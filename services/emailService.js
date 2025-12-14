@@ -1,7 +1,9 @@
-import emailjs from '@emailjs/nodejs';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// EmailJS API endpoint
+const EMAILJS_API_URL = 'https://api.emailjs.com/api/v1.0/email/send';
 
 /**
  * Generate HTML email template for payment confirmation
@@ -248,38 +250,49 @@ export const sendPaymentConfirmationEmail = async ({
   };
 
   try {
-    // Send email using EmailJS
-    const response = await emailjs.send(
-      process.env.EMAILJS_SERVICE_ID,
-      process.env.EMAILJS_TEMPLATE_ID,
-      templateParams,
-      {
-        publicKey: process.env.EMAILJS_PUBLIC_KEY,
-        // Optional: Use private key for server-side (more secure)
-        privateKey: process.env.EMAILJS_PRIVATE_KEY || undefined,
-      }
-    );
+    // Prepare request payload for EmailJS API
+    const requestPayload = {
+      service_id: process.env.EMAILJS_SERVICE_ID,
+      template_id: process.env.EMAILJS_TEMPLATE_ID,
+      user_id: process.env.EMAILJS_PUBLIC_KEY,
+      template_params: templateParams,
+      accessToken: process.env.EMAILJS_PRIVATE_KEY || undefined // Optional: for server-side
+    };
 
-    console.log('📧 Email sent successfully via EmailJS:', response.text);
+    // Send email using EmailJS REST API
+    const response = await fetch(EMAILJS_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestPayload)
+    });
+
+    const responseData = await response.text();
+
+    if (!response.ok) {
+      let errorMessage = 'Email sending failed';
+      if (response.status === 400) {
+        errorMessage = 'Invalid EmailJS configuration. Please check your Service ID, Template ID, and Public Key.';
+      } else if (response.status === 401) {
+        errorMessage = 'EmailJS authentication failed. Please check your Public Key.';
+      } else if (response.status === 404) {
+        errorMessage = 'EmailJS service or template not found. Please check your Service ID and Template ID.';
+      } else {
+        errorMessage = `EmailJS API error: ${responseData || response.statusText}`;
+      }
+      throw new Error(errorMessage);
+    }
+
+    console.log('📧 Email sent successfully via EmailJS:', responseData);
     return {
       success: true,
-      messageId: response.text,
+      messageId: responseData,
       status: response.status
     };
   } catch (error) {
     console.error('❌ Email sending failed:', error);
-    
-    // Provide helpful error messages
-    let errorMessage = error.message || 'Unknown error';
-    if (error.status === 400) {
-      errorMessage = 'Invalid EmailJS configuration. Please check your Service ID, Template ID, and Public Key.';
-    } else if (error.status === 401) {
-      errorMessage = 'EmailJS authentication failed. Please check your Public Key.';
-    } else if (error.status === 404) {
-      errorMessage = 'EmailJS service or template not found. Please check your Service ID and Template ID.';
-    }
-    
-    throw new Error(errorMessage);
+    throw error;
   }
 };
 
