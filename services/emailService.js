@@ -1,35 +1,7 @@
-import nodemailer from 'nodemailer';
+import emailjs from '@emailjs/nodejs';
 import dotenv from 'dotenv';
 
 dotenv.config();
-
-// Get SMTP port from env or default to 465 (more reliable on cloud platforms)
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || '465', 10);
-const USE_SECURE = SMTP_PORT === 465;
-
-// Create transporter with Gmail SMTP configuration
-// Using port 465 with secure connection for better compatibility on cloud platforms like Render
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: SMTP_PORT,
-  secure: USE_SECURE, // true for 465, false for other ports
-  auth: {
-    user: process.env.SMTP_USER, // Your Gmail address
-    pass: process.env.SMTP_PASS, // Gmail App Password
-  },
-  // Connection timeout settings for cloud platforms
-  connectionTimeout: 60000, // 60 seconds
-  greetingTimeout: 30000, // 30 seconds
-  socketTimeout: 60000, // 60 seconds
-  // Retry configuration
-  pool: true, // Use connection pooling
-  maxConnections: 1,
-  maxMessages: 3,
-  // TLS options for secure connection
-  tls: {
-    rejectUnauthorized: false // Accept self-signed certificates if needed (for some cloud environments)
-  }
-});
 
 /**
  * Generate HTML email template for payment confirmation
@@ -212,14 +184,13 @@ const generateEmailTemplate = ({ orderId, totalAmount, transactionId, paymentDat
 };
 
 /**
- * Send payment confirmation email with retry logic
+ * Send payment confirmation email using EmailJS
  * @param {Object} orderData - Order information
  * @param {string} orderData.to - Recipient email address
  * @param {string} orderData.orderId - Order ID
  * @param {number} orderData.totalAmount - Total amount
  * @param {string} orderData.transactionId - Transaction ID (optional)
  * @param {string} orderData.paymentDate - Payment date (optional)
- * @param {number} retries - Number of retry attempts (default: 2)
  * @returns {Promise} Promise that resolves when email is sent
  */
 export const sendPaymentConfirmationEmail = async ({
@@ -228,10 +199,13 @@ export const sendPaymentConfirmationEmail = async ({
   totalAmount,
   transactionId,
   paymentDate
-}, retries = 2) => {
-  // Validate SMTP configuration
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    throw new Error('SMTP credentials are not configured. Please set SMTP_USER and SMTP_PASS in .env file');
+}) => {
+  // Validate EmailJS configuration
+  if (!process.env.EMAILJS_SERVICE_ID || !process.env.EMAILJS_TEMPLATE_ID || !process.env.EMAILJS_PUBLIC_KEY) {
+    throw new Error(
+      'EmailJS credentials are not configured. ' +
+      'Please set EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, and EMAILJS_PUBLIC_KEY in .env file'
+    );
   }
 
   const emailContent = generateEmailTemplate({
@@ -241,62 +215,92 @@ export const sendPaymentConfirmationEmail = async ({
     paymentDate
   });
 
-  const mailOptions = {
-    from: `"Shopping App" <${process.env.SMTP_USER}>`,
-    to: to,
+  const formattedDate = paymentDate 
+    ? new Date(paymentDate).toLocaleString('vi-VN', { 
+        timeZone: 'Asia/Ho_Chi_Minh',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    : new Date().toLocaleString('vi-VN');
+
+  const formattedAmount = totalAmount 
+    ? new Intl.NumberFormat('vi-VN').format(totalAmount) 
+    : 'N/A';
+
+  // Prepare template parameters for EmailJS
+  const templateParams = {
+    to_email: to,
+    to_name: to.split('@')[0], // Extract name from email
     subject: `✅ Thanh toán thành công - Đơn hàng #${orderId}`,
-    html: emailContent,
+    message: emailContent,
+    // Additional fields for template variables
+    order_id: orderId,
+    total_amount: formattedAmount,
+    transaction_id: transactionId || 'N/A',
+    payment_date: formattedDate,
+    // Raw values for template customization
+    raw_amount: totalAmount || 0,
+    payment_method: 'VNPay',
+    order_status: 'Đang giao hàng'
   };
 
-  // Retry logic for handling connection timeouts
-  let lastError;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      if (attempt > 0) {
-        console.log(`🔄 Retrying email send (attempt ${attempt + 1}/${retries + 1})...`);
-        // Wait before retry (exponential backoff)
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+  try {
+    // Send email using EmailJS
+    const response = await emailjs.send(
+      process.env.EMAILJS_SERVICE_ID,
+      process.env.EMAILJS_TEMPLATE_ID,
+      templateParams,
+      {
+        publicKey: process.env.EMAILJS_PUBLIC_KEY,
+        // Optional: Use private key for server-side (more secure)
+        privateKey: process.env.EMAILJS_PRIVATE_KEY || undefined,
       }
+    );
 
-      const info = await transporter.sendMail(mailOptions);
-      console.log('📧 Email sent successfully:', info.messageId);
-      return info;
-    } catch (error) {
-      lastError = error;
-      console.error(`❌ Email sending failed (attempt ${attempt + 1}/${retries + 1}):`, error.message);
-      
-      // If it's a timeout error and we have retries left, continue
-      if (attempt < retries && (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.code === 'ESOCKET')) {
-        continue;
-      }
-      
-      // If it's not a timeout or we're out of retries, throw immediately
-      if (error.code !== 'ETIMEDOUT' && error.code !== 'ECONNRESET' && error.code !== 'ESOCKET') {
-        throw error;
-      }
+    console.log('📧 Email sent successfully via EmailJS:', response.text);
+    return {
+      success: true,
+      messageId: response.text,
+      status: response.status
+    };
+  } catch (error) {
+    console.error('❌ Email sending failed:', error);
+    
+    // Provide helpful error messages
+    let errorMessage = error.message || 'Unknown error';
+    if (error.status === 400) {
+      errorMessage = 'Invalid EmailJS configuration. Please check your Service ID, Template ID, and Public Key.';
+    } else if (error.status === 401) {
+      errorMessage = 'EmailJS authentication failed. Please check your Public Key.';
+    } else if (error.status === 404) {
+      errorMessage = 'EmailJS service or template not found. Please check your Service ID and Template ID.';
     }
+    
+    throw new Error(errorMessage);
+  }
+};
+
+/**
+ * Verify EmailJS configuration
+ * @returns {Promise} Promise that resolves if configuration is valid
+ */
+export const verifyEmailJSConnection = async () => {
+  if (!process.env.EMAILJS_SERVICE_ID || !process.env.EMAILJS_TEMPLATE_ID || !process.env.EMAILJS_PUBLIC_KEY) {
+    throw new Error('EmailJS credentials are not configured');
   }
 
-  // If we exhausted all retries, throw the last error
-  throw lastError;
+  try {
+    // Test connection by sending a test email (optional)
+    // Or just verify credentials are set
+    console.log('✅ EmailJS configuration verified');
+    console.log(`📌 Service ID: ${process.env.EMAILJS_SERVICE_ID}`);
+    console.log(`📌 Template ID: ${process.env.EMAILJS_TEMPLATE_ID}`);
+    return true;
+  } catch (error) {
+    console.error('❌ EmailJS configuration error:', error.message);
+    throw error;
+  }
 };
-
-// Verify transporter configuration (only when explicitly called, not on module load)
-// This prevents timeout errors during server startup on cloud platforms
-export const verifySMTPConnection = () => {
-  return new Promise((resolve, reject) => {
-    transporter.verify((error, success) => {
-      if (error) {
-        console.error('❌ SMTP connection error:', error.message);
-        console.log('⚠️  Please check your SMTP credentials in .env file');
-        console.log(`📌 Using port ${SMTP_PORT} with secure=${USE_SECURE}`);
-        reject(error);
-      } else {
-        console.log('✅ SMTP server is ready to send emails');
-        console.log(`📌 Connected via port ${SMTP_PORT} (secure=${USE_SECURE})`);
-        resolve(success);
-      }
-    });
-  });
-};
-

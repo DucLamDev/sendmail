@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { sendPaymentConfirmationEmail } from './services/emailService.js';
+import { sendPaymentConfirmationEmail, verifyEmailJSConnection } from './services/emailService.js';
 
 // Load environment variables
 dotenv.config();
@@ -27,11 +27,22 @@ app.get('/', (req, res) => {
 
 // API endpoint to send payment confirmation email
 app.post('/api/send-payment-email', async (req, res) => {
+  // Set timeout for the request (30 seconds)
+  const timeout = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(504).json({ 
+        success: false, 
+        error: 'Request timeout - Email service may be unavailable. Please try again or contact support.' 
+      });
+    }
+  }, 30000); // 30 seconds timeout
+
   try {
     const { to, orderId, totalAmount, transactionId, paymentDate } = req.body;
 
     // Validate required fields
     if (!to || !orderId) {
+      clearTimeout(timeout);
       return res.status(400).json({ 
         success: false,
         error: 'Missing required fields: to and orderId are required' 
@@ -41,14 +52,15 @@ app.post('/api/send-payment-email', async (req, res) => {
     // Validate email format (basic)
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(to)) {
+      clearTimeout(timeout);
       return res.status(400).json({ 
         success: false,
         error: 'Invalid email format' 
       });
     }
 
-    // Send email
-    await sendPaymentConfirmationEmail({
+    // Send email with Promise.race to handle timeout
+    const emailPromise = sendPaymentConfirmationEmail({
       to,
       orderId,
       totalAmount,
@@ -56,6 +68,13 @@ app.post('/api/send-payment-email', async (req, res) => {
       paymentDate
     });
 
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Email sending timeout after 25 seconds')), 25000);
+    });
+
+    await Promise.race([emailPromise, timeoutPromise]);
+
+    clearTimeout(timeout);
     console.log(`✅ Email sent successfully to: ${to} for order #${orderId}`);
     
     return res.status(200).json({ 
@@ -65,10 +84,16 @@ app.post('/api/send-payment-email', async (req, res) => {
     });
 
   } catch (error) {
+    clearTimeout(timeout);
     console.error('❌ Error sending email:', error);
+    
+    // Provide more helpful error messages
+    let errorMessage = error.message || 'Internal server error';
+    
     return res.status(500).json({ 
       success: false, 
-      error: error.message || 'Internal server error' 
+      error: errorMessage,
+      code: error.code || 'UNKNOWN_ERROR'
     });
   }
 });
@@ -90,25 +115,33 @@ app.use((req, res) => {
   });
 });
 
-// Health check with SMTP status
+// Health check with EmailJS status
 app.get('/health', async (req, res) => {
   const health = {
     status: 'ok',
     timestamp: new Date().toISOString(),
-    smtp: {
-      configured: !!(process.env.SMTP_USER && process.env.SMTP_PASS),
-      port: process.env.SMTP_PORT || '465',
-      secure: (process.env.SMTP_PORT || '465') === '465'
+    emailjs: {
+      configured: !!(process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && process.env.EMAILJS_PUBLIC_KEY),
+      serviceId: process.env.EMAILJS_SERVICE_ID || 'not set',
+      templateId: process.env.EMAILJS_TEMPLATE_ID || 'not set',
+      hasPublicKey: !!process.env.EMAILJS_PUBLIC_KEY,
+      hasPrivateKey: !!process.env.EMAILJS_PRIVATE_KEY
     }
   };
   res.json(health);
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
-  console.log(`📧 Email service ready to send payment confirmations`);
-  console.log(`📌 SMTP Port: ${process.env.SMTP_PORT || '465'} (secure: ${(process.env.SMTP_PORT || '465') === '465'})`);
-  console.log(`💡 Note: SMTP connection will be verified on first email send`);
+  console.log(`📧 Email service ready to send payment confirmations via EmailJS`);
+  
+  // Verify EmailJS configuration on startup
+  try {
+    await verifyEmailJSConnection();
+  } catch (error) {
+    console.warn('⚠️  EmailJS configuration issue:', error.message);
+    console.log('💡 Please check your EmailJS credentials in .env file');
+  }
 });
 
