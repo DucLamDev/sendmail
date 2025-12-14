@@ -86,20 +86,29 @@
    - Click **"Save"**
    - Copy **Template ID** (dạng: `template_xxxxx`)
 
-## Bước 4: Lấy API Keys
+## Bước 4: Bật Server-Side API và Lấy Private Key
 
-1. **Vào Account Settings:**
+**QUAN TRỌNG:** Để sử dụng EmailJS từ server-side (Node.js), bạn PHẢI bật tính năng này.
+
+1. **Vào Security Settings:**
    - Click vào avatar/profile ở góc trên bên phải
-   - Chọn **"Account"** hoặc **"General"**
+   - Chọn **"Account"** → **"Security"**
 
-2. **Copy Public Key:**
-   - Tìm **"Public Key"** hoặc **"User ID"**
-   - Copy key này (dạng: `xxxxxxxxxxxxx`)
+2. **Bật "Allow EmailJS API for non-browser applications":**
+   - Tìm mục **"API Security"** hoặc **"Non-browser applications"**
+   - **BẬT** toggle **"Allow EmailJS API for non-browser applications"**
+   - Lưu thay đổi
 
-3. **Copy Private Key (Optional - Recommended):**
+3. **Lấy Private Key (Access Token):**
+   - Trong cùng trang Security
    - Tìm **"Private Key"** hoặc **"Access Token"**
-   - Copy key này nếu có (dùng cho server-side, an toàn hơn)
-   - Nếu không có, có thể dùng Public Key
+   - Click **"Generate"** hoặc **"Show"** để xem Private Key
+   - **Copy Private Key này** (dạng: `xxxxxxxxxxxxx` hoặc `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
+   - ⚠️ **Lưu ý:** Private Key chỉ hiển thị một lần, hãy copy ngay!
+
+4. **Copy Public Key (Optional - for reference):**
+   - Tìm **"Public Key"** hoặc **"User ID"**
+   - Copy key này (có thể dùng để tham khảo, nhưng server-side cần Private Key)
 
 ## Bước 5: Cấu hình .env
 
@@ -108,10 +117,15 @@ Tạo file `.env` với các thông tin đã lấy:
 ```env
 EMAILJS_SERVICE_ID=service_xxxxx
 EMAILJS_TEMPLATE_ID=template_xxxxx
-EMAILJS_PUBLIC_KEY=your_public_key_here
 EMAILJS_PRIVATE_KEY=your_private_key_here
+EMAILJS_PUBLIC_KEY=your_public_key_here
 PORT=3000
 ```
+
+**Lưu ý quan trọng:**
+- `EMAILJS_PRIVATE_KEY` là **BẮT BUỘC** cho server-side API calls
+- `EMAILJS_PUBLIC_KEY` là optional (có thể để trống hoặc dùng Private Key)
+- Đảm bảo đã bật "Allow EmailJS API for non-browser applications" trong Security settings
 
 ## Bước 6: Test
 
@@ -168,13 +182,42 @@ PORT=3000
 - [EmailJS Documentation](https://www.emailjs.com/docs/)
 - [EmailJS Node.js SDK](https://www.emailjs.com/docs/nodejs/)
 
+## 🐛 Troubleshooting
+
+### Lỗi "API calls are disabled for non-browser applications"
+
+**Nguyên nhân:** EmailJS mặc định chặn API calls từ server-side để bảo mật.
+
+**Giải pháp:**
+1. Vào EmailJS Dashboard → Account → Security
+2. Bật **"Allow EmailJS API for non-browser applications"**
+3. Lấy **Private Key (Access Token)** từ cùng trang
+4. Thêm `EMAILJS_PRIVATE_KEY` vào `.env` file
+5. Restart server
+
+### Lỗi "EMAILJS_PRIVATE_KEY is required"
+
+**Giải pháp:**
+- Private Key là bắt buộc cho server-side API calls
+- Lấy Private Key từ: Dashboard → Account → Security
+- Thêm vào `.env`: `EMAILJS_PRIVATE_KEY=your_private_key_here`
+
+### Lỗi "Invalid EmailJS configuration"
+
+**Kiểm tra:**
+- Service ID có đúng không?
+- Template ID có đúng không?
+- Private Key có đúng không?
+- Đã bật "Allow EmailJS API for non-browser applications" chưa?
+
 ## ✅ Checklist
 
 - [ ] Đã đăng ký EmailJS account
 - [ ] Đã tạo Email Service và copy Service ID
 - [ ] Đã tạo Email Template và copy Template ID
-- [ ] Đã copy Public Key (và Private Key nếu có)
-- [ ] Đã cấu hình `.env` file
+- [ ] **Đã bật "Allow EmailJS API for non-browser applications" trong Security**
+- [ ] **Đã lấy Private Key (Access Token) từ Security settings**
+- [ ] Đã cấu hình `.env` file với Private Key
 - [ ] Đã test thành công trên localhost
-- [ ] Đã set environment variables trên Render
+- [ ] Đã set environment variables trên Render (bao gồm EMAILJS_PRIVATE_KEY)
 

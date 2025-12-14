@@ -121,11 +121,11 @@ app.get('/health', async (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     emailjs: {
-      configured: !!(process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && process.env.EMAILJS_PUBLIC_KEY),
+      configured: !!(process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && process.env.EMAILJS_PRIVATE_KEY),
       serviceId: process.env.EMAILJS_SERVICE_ID || 'not set',
       templateId: process.env.EMAILJS_TEMPLATE_ID || 'not set',
-      hasPublicKey: !!process.env.EMAILJS_PUBLIC_KEY,
-      hasPrivateKey: !!process.env.EMAILJS_PRIVATE_KEY
+      hasPrivateKey: !!process.env.EMAILJS_PRIVATE_KEY,
+      note: 'Private Key (Access Token) is required for server-side API calls'
     }
   };
   res.json(health);

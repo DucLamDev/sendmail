@@ -203,10 +203,20 @@ export const sendPaymentConfirmationEmail = async ({
   paymentDate
 }) => {
   // Validate EmailJS configuration
-  if (!process.env.EMAILJS_SERVICE_ID || !process.env.EMAILJS_TEMPLATE_ID || !process.env.EMAILJS_PUBLIC_KEY) {
+  // For server-side, we need Private Key (Access Token)
+  if (!process.env.EMAILJS_SERVICE_ID || !process.env.EMAILJS_TEMPLATE_ID) {
     throw new Error(
       'EmailJS credentials are not configured. ' +
-      'Please set EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, and EMAILJS_PUBLIC_KEY in .env file'
+      'Please set EMAILJS_SERVICE_ID and EMAILJS_TEMPLATE_ID in .env file'
+    );
+  }
+
+  // Private Key is required for server-side API calls
+  if (!process.env.EMAILJS_PRIVATE_KEY) {
+    throw new Error(
+      'EMAILJS_PRIVATE_KEY is required for server-side API calls. ' +
+      'Please get your Private Key (Access Token) from EmailJS Dashboard → Account → Security, ' +
+      'and enable "Allow EmailJS API for non-browser applications"'
     );
   }
 
@@ -251,12 +261,13 @@ export const sendPaymentConfirmationEmail = async ({
 
   try {
     // Prepare request payload for EmailJS API
+    // For server-side, we use Private Key (Access Token) instead of Public Key
     const requestPayload = {
       service_id: process.env.EMAILJS_SERVICE_ID,
       template_id: process.env.EMAILJS_TEMPLATE_ID,
-      user_id: process.env.EMAILJS_PUBLIC_KEY,
+      user_id: process.env.EMAILJS_PUBLIC_KEY || process.env.EMAILJS_PRIVATE_KEY, // Can use either
       template_params: templateParams,
-      accessToken: process.env.EMAILJS_PRIVATE_KEY || undefined // Optional: for server-side
+      accessToken: process.env.EMAILJS_PRIVATE_KEY // Required for server-side
     };
 
     // Send email using EmailJS REST API
@@ -273,11 +284,13 @@ export const sendPaymentConfirmationEmail = async ({
     if (!response.ok) {
       let errorMessage = 'Email sending failed';
       if (response.status === 400) {
-        errorMessage = 'Invalid EmailJS configuration. Please check your Service ID, Template ID, and Public Key.';
+        errorMessage = 'Invalid EmailJS configuration. Please check your Service ID, Template ID, and Private Key.';
       } else if (response.status === 401) {
-        errorMessage = 'EmailJS authentication failed. Please check your Public Key.';
+        errorMessage = 'EmailJS authentication failed. Please check your Private Key (Access Token).';
       } else if (response.status === 404) {
         errorMessage = 'EmailJS service or template not found. Please check your Service ID and Template ID.';
+      } else if (responseData.includes('non-browser')) {
+        errorMessage = 'EmailJS API calls are disabled for non-browser applications. Please enable "Allow EmailJS API for non-browser applications" in EmailJS Dashboard → Account → Security, and use Private Key (Access Token) instead of Public Key.';
       } else {
         errorMessage = `EmailJS API error: ${responseData || response.statusText}`;
       }
@@ -301,16 +314,20 @@ export const sendPaymentConfirmationEmail = async ({
  * @returns {Promise} Promise that resolves if configuration is valid
  */
 export const verifyEmailJSConnection = async () => {
-  if (!process.env.EMAILJS_SERVICE_ID || !process.env.EMAILJS_TEMPLATE_ID || !process.env.EMAILJS_PUBLIC_KEY) {
+  if (!process.env.EMAILJS_SERVICE_ID || !process.env.EMAILJS_TEMPLATE_ID) {
     throw new Error('EmailJS credentials are not configured');
   }
 
+  if (!process.env.EMAILJS_PRIVATE_KEY) {
+    console.warn('⚠️  EMAILJS_PRIVATE_KEY is not set. Server-side API calls require Private Key.');
+    console.warn('💡 Get your Private Key from EmailJS Dashboard → Account → Security');
+  }
+
   try {
-    // Test connection by sending a test email (optional)
-    // Or just verify credentials are set
     console.log('✅ EmailJS configuration verified');
     console.log(`📌 Service ID: ${process.env.EMAILJS_SERVICE_ID}`);
     console.log(`📌 Template ID: ${process.env.EMAILJS_TEMPLATE_ID}`);
+    console.log(`📌 Private Key: ${process.env.EMAILJS_PRIVATE_KEY ? 'Set ✓' : 'Not set ✗'}`);
     return true;
   } catch (error) {
     console.error('❌ EmailJS configuration error:', error.message);
