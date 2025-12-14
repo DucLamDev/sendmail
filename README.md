@@ -8,9 +8,12 @@ API service để gửi email thông báo thanh toán thành công qua Gmail SMT
 - ✅ Template email HTML đẹp mắt, responsive
 - ✅ Hỗ trợ CORS cho mobile app
 - ✅ Validation đầu vào
-- ✅ Error handling đầy đủ
+- ✅ Error handling đầy đủ với retry logic
 - ✅ ES6 syntax (import/export)
 - ✅ Environment variables cho cấu hình
+- ✅ Connection pooling và timeout handling
+- ✅ Hỗ trợ cả port 465 (SSL) và 587 (STARTTLS)
+- ✅ Tối ưu cho cloud platforms (Render, Vercel, etc.)
 
 ## 📋 Yêu cầu
 
@@ -51,8 +54,13 @@ Sửa file `.env` với thông tin của bạn:
 ```env
 SMTP_USER=your-email@gmail.com
 SMTP_PASS=your-16-char-app-password
+SMTP_PORT=465
 PORT=3000
 ```
+
+**Lưu ý về SMTP_PORT:**
+- `465`: Sử dụng SSL/TLS (khuyến nghị cho cloud platforms như Render)
+- `587`: Sử dụng STARTTLS (có thể bị timeout trên một số cloud platforms)
 
 ## 🏃 Chạy ứng dụng
 
@@ -71,6 +79,23 @@ npm start
 Server sẽ chạy tại: `http://localhost:3000`
 
 ## 📡 API Endpoints
+
+### GET `/health`
+
+Kiểm tra trạng thái server và cấu hình SMTP.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "timestamp": "2024-12-15T10:30:00.000Z",
+  "smtp": {
+    "configured": true,
+    "port": "465",
+    "secure": true
+  }
+}
+```
 
 ### POST `/api/send-payment-email`
 
@@ -182,17 +207,36 @@ console.log(response.data);
 - Đảm bảo đang sử dụng App Password, không phải mật khẩu Gmail
 - Kiểm tra 2-Step Verification đã được bật
 
-### Lỗi "Connection timeout"
+### Lỗi "Connection timeout" trên Render/Cloud Platforms
 
-- Kiểm tra kết nối internet
-- Kiểm tra firewall không chặn port 587
-- Thử đổi port sang 465 và `secure: true`
+**Đây là lỗi phổ biến khi deploy lên cloud platforms.** Giải pháp:
+
+1. **Sử dụng port 465 thay vì 587:**
+   ```env
+   SMTP_PORT=465
+   ```
+   Port 465 sử dụng SSL/TLS ngay từ đầu, ổn định hơn trên cloud.
+
+2. **Kiểm tra Environment Variables trên Render:**
+   - Vào Render Dashboard → Service → Environment
+   - Đảm bảo đã set `SMTP_USER`, `SMTP_PASS`, và `SMTP_PORT=465`
+
+3. **Code đã được tối ưu với:**
+   - Connection timeout: 60 giây
+   - Retry logic: tự động retry 2 lần khi timeout
+   - Connection pooling để tái sử dụng kết nối
+
+4. **Nếu vẫn lỗi, thử:**
+   - Kiểm tra firewall/network restrictions trên cloud platform
+   - Xem logs chi tiết trên Render dashboard
+   - Test với endpoint `/health` để kiểm tra cấu hình
 
 ### Email không được gửi
 
 - Kiểm tra console logs để xem lỗi chi tiết
 - Kiểm tra spam folder
-- Verify SMTP connection bằng cách check console khi start server
+- Kiểm tra health endpoint: `GET /health`
+- Code sẽ tự động retry khi gặp timeout (tối đa 3 lần)
 
 ## 📦 Dependencies
 

@@ -90,9 +90,25 @@ app.use((req, res) => {
   });
 });
 
+// Health check with SMTP status
+app.get('/health', async (req, res) => {
+  const health = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    smtp: {
+      configured: !!(process.env.SMTP_USER && process.env.SMTP_PASS),
+      port: process.env.SMTP_PORT || '465',
+      secure: (process.env.SMTP_PORT || '465') === '465'
+    }
+  };
+  res.json(health);
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
   console.log(`📧 Email service ready to send payment confirmations`);
+  console.log(`📌 SMTP Port: ${process.env.SMTP_PORT || '465'} (secure: ${(process.env.SMTP_PORT || '465') === '465'})`);
+  console.log(`💡 Note: SMTP connection will be verified on first email send`);
 });
 

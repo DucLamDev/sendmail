@@ -3,15 +3,32 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Get SMTP port from env or default to 465 (more reliable on cloud platforms)
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || '465', 10);
+const USE_SECURE = SMTP_PORT === 465;
+
 // Create transporter with Gmail SMTP configuration
+// Using port 465 with secure connection for better compatibility on cloud platforms like Render
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // true for 465, false for other ports
+  port: SMTP_PORT,
+  secure: USE_SECURE, // true for 465, false for other ports
   auth: {
     user: process.env.SMTP_USER, // Your Gmail address
     pass: process.env.SMTP_PASS, // Gmail App Password
   },
+  // Connection timeout settings for cloud platforms
+  connectionTimeout: 60000, // 60 seconds
+  greetingTimeout: 30000, // 30 seconds
+  socketTimeout: 60000, // 60 seconds
+  // Retry configuration
+  pool: true, // Use connection pooling
+  maxConnections: 1,
+  maxMessages: 3,
+  // TLS options for secure connection
+  tls: {
+    rejectUnauthorized: false // Accept self-signed certificates if needed (for some cloud environments)
+  }
 });
 
 /**
@@ -195,13 +212,14 @@ const generateEmailTemplate = ({ orderId, totalAmount, transactionId, paymentDat
 };
 
 /**
- * Send payment confirmation email
+ * Send payment confirmation email with retry logic
  * @param {Object} orderData - Order information
  * @param {string} orderData.to - Recipient email address
  * @param {string} orderData.orderId - Order ID
  * @param {number} orderData.totalAmount - Total amount
  * @param {string} orderData.transactionId - Transaction ID (optional)
  * @param {string} orderData.paymentDate - Payment date (optional)
+ * @param {number} retries - Number of retry attempts (default: 2)
  * @returns {Promise} Promise that resolves when email is sent
  */
 export const sendPaymentConfirmationEmail = async ({
@@ -210,7 +228,7 @@ export const sendPaymentConfirmationEmail = async ({
   totalAmount,
   transactionId,
   paymentDate
-}) => {
+}, retries = 2) => {
   // Validate SMTP configuration
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     throw new Error('SMTP credentials are not configured. Please set SMTP_USER and SMTP_PASS in .env file');
@@ -230,23 +248,55 @@ export const sendPaymentConfirmationEmail = async ({
     html: emailContent,
   };
 
-  try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log('📧 Email sent:', info.messageId);
-    return info;
-  } catch (error) {
-    console.error('❌ Email sending failed:', error);
-    throw error;
+  // Retry logic for handling connection timeouts
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      if (attempt > 0) {
+        console.log(`🔄 Retrying email send (attempt ${attempt + 1}/${retries + 1})...`);
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+
+      const info = await transporter.sendMail(mailOptions);
+      console.log('📧 Email sent successfully:', info.messageId);
+      return info;
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ Email sending failed (attempt ${attempt + 1}/${retries + 1}):`, error.message);
+      
+      // If it's a timeout error and we have retries left, continue
+      if (attempt < retries && (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.code === 'ESOCKET')) {
+        continue;
+      }
+      
+      // If it's not a timeout or we're out of retries, throw immediately
+      if (error.code !== 'ETIMEDOUT' && error.code !== 'ECONNRESET' && error.code !== 'ESOCKET') {
+        throw error;
+      }
+    }
   }
+
+  // If we exhausted all retries, throw the last error
+  throw lastError;
 };
 
-// Verify transporter configuration
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('❌ SMTP connection error:', error.message);
-    console.log('⚠️  Please check your SMTP credentials in .env file');
-  } else {
-    console.log('✅ SMTP server is ready to send emails');
-  }
-});
+// Verify transporter configuration (only when explicitly called, not on module load)
+// This prevents timeout errors during server startup on cloud platforms
+export const verifySMTPConnection = () => {
+  return new Promise((resolve, reject) => {
+    transporter.verify((error, success) => {
+      if (error) {
+        console.error('❌ SMTP connection error:', error.message);
+        console.log('⚠️  Please check your SMTP credentials in .env file');
+        console.log(`📌 Using port ${SMTP_PORT} with secure=${USE_SECURE}`);
+        reject(error);
+      } else {
+        console.log('✅ SMTP server is ready to send emails');
+        console.log(`📌 Connected via port ${SMTP_PORT} (secure=${USE_SECURE})`);
+        resolve(success);
+      }
+    });
+  });
+};
 
